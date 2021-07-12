@@ -1,0 +1,158 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+// #pragma kernel CSRemoveDuplicates
+#include "/MarchingTables.compute"
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+//RWTexture2D<float4> Result;
+
+// struct Cube
+// {
+//     float p1, p2, p3, p4, p5, p6, p7, p8;
+
+//     uint x;
+//     uint y;
+//     uint z;
+// };
+
+struct Triangle
+{
+    float3 p1, p2, p3;
+};
+     
+struct Point
+{
+    float3 p;
+    uint filled;
+};
+
+float3 START_POS;
+float3 DIMENSIONS;
+float3 OFFSETS;
+float SURFACE;
+
+RWStructuredBuffer<float> _values;
+AppendStructuredBuffer<Triangle> _triangles;
+//RWStructuredBuffer<float3> outVertex;
+
+/////////////////////////helpers/////////////////////
+float GetOffset(float v1, float v2, float in_surface){
+        float delta = v2 - v1;
+        return (delta == 0.0f) ? in_surface : (in_surface - v1) / delta;
+}
+
+float GetValue(uint x,uint y,uint z)
+{
+    return _values[x + y * DIMENSIONS.x + z * DIMENSIONS.y * DIMENSIONS.x];
+}
+/////////////////////////////////////////////////////////
+
+[numthreads(4,4,4)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= (uint)(DIMENSIONS.x - 1) || id.y >= (uint)DIMENSIONS.y - 1 || id.z >= (uint)DIMENSIONS.z - 1) return;
+
+    uint i = 0;
+    float cube [8]; 
+    
+    //get cube values
+    for(i = 0; i < 8 ; i++)
+    {
+       cube[i] = GetValue(id.x + VertexOffset[i][0] , id.y + VertexOffset[i][1] , id.z + VertexOffset[i][2]);
+       //cube[i] = GetValue(id.x , id.y, id.z );
+    }
+       
+    uint flagConfig = 0;
+    uint edgeFlags = 0;
+    float offset = 0;
+    
+    //check wich verticies are active and create binary configuration
+    for (i = 0; i < 8; i++) if (cube[i] <= SURFACE) flagConfig |= 1 << i;
+
+    //check wich edges intersect with surface
+    edgeFlags = CubeEdgeFlags[flagConfig];
+
+    //if cube completely active/incative, we dont need to march it
+    if (edgeFlags == 0) return;
+
+    float3 EdgeVertex [12];
+
+    //creating "intersection" points
+    for (i = 0; i < 12; i++)
+    {
+        //if there is an intersection
+        if ((edgeFlags & (1 << i)) != 0)
+        {
+            offset = GetOffset(cube[EdgeConnection[i][0]], cube[EdgeConnection[i][1]], SURFACE);
+            //centering mesh verticies
+            EdgeVertex[i].x = (id.x + (VertexOffset[ EdgeConnection[i][0] ][0] + offset * EdgeDirection[i][0])) * OFFSETS.x;
+            EdgeVertex[i].y = (id.y + (VertexOffset[ EdgeConnection[i][0] ][1] + offset * EdgeDirection[i][1])) * OFFSETS.y;
+            EdgeVertex[i].z = (id.z + (VertexOffset[ EdgeConnection[i][0] ][2] + offset * EdgeDirection[i][2])) * OFFSETS.z;
+
+            EdgeVertex[i] += START_POS;
+        }
+    }
+
+    //float3 newVertex;
+    
+    //save all triangles so we can check for duplicates later
+    //create triangles, there can be up to 5 per cube
+    for (i = 0; i < 5; i++)
+    {
+        //if no triangle can be created
+        if (TriangleConnectionTable[flagConfig][3 * i] < 0) break;
+
+        //single triangle
+        // for (int j = 0; j < 3; j++)
+        // {
+        Triangle _tria;
+
+        _tria.p1 = EdgeVertex[TriangleConnectionTable[flagConfig][ 3 * i + 2 ]];
+        _tria.p2 = EdgeVertex[TriangleConnectionTable[flagConfig][ 3 * i + 1 ]];
+        _tria.p3 = EdgeVertex[TriangleConnectionTable[flagConfig][ 3 * i + 0 ]];
+        _triangles.Append(_tria);
+
+        // }
+
+        // outVertex[id.x + (id.y * DIMENSIONS.x) + (id.z * DIMENSIONS.y * DIMENSIONS.x) + ((i * 3) + 0)].p = EdgeVertex[TriangleConnectionTable[flagConfig][ 3 * i + 0 ]];
+        // outVertex[id.x + (id.y * DIMENSIONS.x) + (id.z * DIMENSIONS.y * DIMENSIONS.x) + ((i * 3) + 1)].p = EdgeVertex[TriangleConnectionTable[flagConfig][ 3 * i + 1 ]];
+        // outVertex[id.x + (id.y * DIMENSIONS.x) + (id.z * DIMENSIONS.y * DIMENSIONS.x) + ((i * 3) + 2)].p = EdgeVertex[TriangleConnectionTable[flagConfig][ 3 * i + 2 ]];
+
+        // outVertex[id.x + (id.y * DIMENSIONS.x) + (id.z * DIMENSIONS.y * DIMENSIONS.x) + ((i * 3) + 0)].filled = 1;
+        // outVertex[id.x + (id.y * DIMENSIONS.x) + (id.z * DIMENSIONS.y * DIMENSIONS.x) + ((i * 3) + 1)].filled = 1;
+        // outVertex[id.x + (id.y * DIMENSIONS.x) + (id.z * DIMENSIONS.y * DIMENSIONS.x) + ((i * 3) + 2)].filled = 1; 
+    }
+    
+}
+
+// uint VERTEX_COUNT;
+
+// StructuredBuffer<float3> inVertex;
+// RWStructuredBuffer<uint> outVertexID;
+
+
+// [numthreads(8,1,1)]
+// void CSRemoveDuplicates (uint3 id : SV_DispatchThreadID)
+// {
+//     outVertexID[id.x] = id.x;
+    
+//     GroupMemoryBarrierWithGroupSync();
+    
+//     uint i = 0;
+//     float3 _check;
+//     //we go through each triangle in buffer and assing verticies and triangle indecies
+//     //this way we can search for several duplicates silmuntaniously;
+    
+//     for(i = 0; i < VERTEX_COUNT;i++)
+//     {
+        
+//         _check = inVertex[i] - inVertex[id.x];
+//         // if((inVertex[i].x - inVertex[id.x].x) == 0)
+//         // {
+//         if((i > id.x) && length(_check) == 0) outVertexID[i] = id.x;
+//         // }
+//     }
+// }
+
+
