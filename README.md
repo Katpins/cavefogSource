@@ -1,6 +1,6 @@
-# cavefogSource
-pure code files for Cavefog project
+## cavefogSource
+pure code files for Cavefog project<br/>
 
-some code inspired/referenced from:
+some code inspired/referenced from:<br/>
 Eldemarkki<br/>
-SebLague<br/>
+SebLague
